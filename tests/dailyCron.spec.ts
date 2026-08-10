@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { LEAGUE_NAME } from '../src/constants/branding';
 import { MockEmailService } from '../src/emailService';
 import {
   filterMatchesForToday,
@@ -62,7 +63,7 @@ test.describe('Resumen matutino', () => {
     );
 
     const html = formatMorningSummaryHtml(match);
-    expect(html).toContain('¡Hoy hay partido del Mundial!');
+    expect(html).toContain(`¡Hoy hay partido de la ${LEAGUE_NAME}!`);
     expect(html).toContain('Francia');
     expect(html).toContain('España');
     expect(html).toContain('https://crests.example/france.svg');
@@ -104,7 +105,7 @@ test.describe('Resumen matutino', () => {
     expect(sent).toHaveLength(2);
     expect(emailService.sentEmails).toHaveLength(2);
     expect(emailService.sentEmails[0].subject).toBe('⚽ Partido de hoy: Francia vs España');
-    expect(emailService.sentEmails[0].html).toContain('¡Hoy hay partido del Mundial!');
+    expect(emailService.sentEmails[0].html).toContain(`¡Hoy hay partido de la ${LEAGUE_NAME}!`);
     expect(emailService.sentEmails[0].html).toContain('🏆 Instancia: Semifinal');
     expect(emailService.sentEmails[1].subject).toBe('⚽ Partido de hoy: Brasil vs Alemania');
   });

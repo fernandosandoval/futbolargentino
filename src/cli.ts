@@ -1,22 +1,16 @@
 import { FootballDataClient } from './apiClient';
-import { loadConfigForCli } from './config';
+import { LEAGUE_NAME } from './constants/branding';
 import { formatCuantoFalta } from './utils/time';
 
 async function main(): Promise<void> {
-  const cliConfig = loadConfigForCli();
-
-  const apiClient = new FootballDataClient({
-    apiKey: cliConfig.footballDataApiKey,
-    worldCupCompetitionCode: cliConfig.worldCupCompetitionCode,
-  });
+  const apiClient = new FootballDataClient();
 
   const nextMatch = await apiClient.getNextMatch();
 
   if (!nextMatch) {
-    console.log('No hay próximos partidos programados en el Mundial.');
+    console.log(`No hay próximos partidos programados en la ${LEAGUE_NAME}.`);
     process.exit(0);
   }
-
   console.log(
     formatCuantoFalta(nextMatch.homeTeamName, nextMatch.awayTeamName, nextMatch.startTime),
   );

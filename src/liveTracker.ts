@@ -144,13 +144,14 @@ export class LiveMatchTracker {
   }
 
   private async handleMatchFinished(match: { status: string; score?: { fullTime?: { homeTeam?: number | null; awayTeam?: number | null } } }): Promise<void> {
-    const home = match.score?.fullTime?.homeTeam ?? 0;
-    const away = match.score?.fullTime?.awayTeam ?? 0;
     const homeName = this.match.homeTeamName;
     const awayName = this.match.awayTeamName;
 
     // Obtener el match actualizado de la API para tener goles y marcador completos
     const freshMatch = await this.apiClient.getMatchById(this.match.id);
+    const freshHome = freshMatch.score?.fullTime?.homeTeam ?? 0;
+    const freshAway = freshMatch.score?.fullTime?.awayTeam ?? 0;
+
     const updatedMatch: MatchInfo = {
       ...this.match,
       status: freshMatch.status as MatchInfo['status'],
@@ -159,23 +160,23 @@ export class LiveMatchTracker {
       substitutions: freshMatch.substitutions ?? [],
       halfTimeHome: freshMatch.score?.halfTime?.homeTeam ?? this.match.halfTimeHome,
       halfTimeAway: freshMatch.score?.halfTime?.awayTeam ?? this.match.halfTimeAway,
-      fullTimeHome: freshMatch.score?.fullTime?.homeTeam ?? home,
-      fullTimeAway: freshMatch.score?.fullTime?.awayTeam ?? away,
+      fullTimeHome: freshHome,
+      fullTimeAway: freshAway,
       duration: (freshMatch.score?.duration as MatchInfo['duration']) ?? this.match.duration,
       attendance: freshMatch.attendance ?? this.match.attendance,
     };
 
     const fakeMatch = {
       score: {
-        fullTime: { homeTeam: home, awayTeam: away },
-        winner: home > away ? 'HOME_TEAM' : away > home ? 'AWAY_TEAM' : 'DRAW',
+        fullTime: { homeTeam: freshHome, awayTeam: freshAway },
+        winner: freshHome > freshAway ? 'HOME_TEAM' : freshAway > freshHome ? 'AWAY_TEAM' : 'DRAW',
       },
       homeTeam: { name: homeName },
       awayTeam: { name: awayName },
     } as Parameters<typeof describeMatchWinner>[0];
 
     const description = describeMatchWinner(fakeMatch);
-    const subject = `Terminó: ${homeName} vs ${awayName}`;
+    const subject = `Terminó: ${homeName} ${freshHome} - ${freshAway} ${awayName}`;
     const html = matchResultHtml(updatedMatch, description);
 
     await this.emailService.send(subject, description, { html });

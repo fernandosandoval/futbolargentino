@@ -1,19 +1,21 @@
 {
-  "name": "mundial2026-argentina-monitor",
+  "name": "liga-profesional-monitor",
   "version": "1.0.0",
-  "description": "Monitor automatizado de partidos de Argentina en el Mundial 2026",
+  "description": "Monitor automatizado de la Liga Profesional de Futbol Argentino",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "cuantoFalta": "tsx src/cli.ts",
+    "test-email": "tsx src/test-email.ts",
+    "debug:next-match": "tsx scripts/debug-next-match.ts",
     "test": "playwright test"
   },
   "keywords": [
-    "mundial",
+    "liga-profesional",
     "argentina",
-    "football-data",
+    "espn",
     "resend"
   ],
   "license": "MIT",

@@ -15,9 +15,6 @@ function optionalEnv(name: string, defaultValue: string): string {
 }
 
 export const config = {
-  footballDataApiKey: requireEnv('FOOTBALL_DATA_API_KEY'),
-  argentinaTeamId: Number(optionalEnv('ARGENTINA_TEAM_ID', '7627')),
-  worldCupCompetitionCode: optionalEnv('WORLD_CUP_COMPETITION_CODE', 'WC'),
   resendApiKey: requireEnv('RESEND_API_KEY'),
   resendFromEmail: requireEnv('RESEND_FROM_EMAIL'),
   notificationEmail: requireEnv('NOTIFICATION_EMAIL'),
@@ -27,13 +24,3 @@ export const config = {
   liveTrackingPollIntervalMs: Number(optionalEnv('LIVE_POLL_INTERVAL_MS', '60000')),
   jobStorePath: optionalEnv('JOB_STORE_PATH', 'data/jobs.json'),
 };
-
-export function loadConfigForCli(): Pick<
-  typeof config,
-  'footballDataApiKey' | 'worldCupCompetitionCode'
-> {
-  return {
-    footballDataApiKey: requireEnv('FOOTBALL_DATA_API_KEY'),
-    worldCupCompetitionCode: optionalEnv('WORLD_CUP_COMPETITION_CODE', 'WC'),
-  };
-}

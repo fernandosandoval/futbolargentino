@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import { FootballDataClient } from './apiClient';
 import { config } from './config';
+import { LEAGUE_NAME, MONITOR_NAME, SERVICE_ID } from './constants/branding';
 import { startMiddaySummaryCron } from './dailyCron';
 import { ResendEmailService } from './emailService';
 import { JobStore } from './jobStore';
@@ -17,8 +18,8 @@ async function sendStartupTestEmail(
 
   if (!nextMatch) {
     await emailService.send(
-      'Prueba de monitor - Mundial 2026',
-      'El monitor está activo. No hay partidos próximos programados en el Mundial.',
+      `Prueba de ${MONITOR_NAME}`,
+      `El monitor está activo. No hay partidos próximos programados en la ${LEAGUE_NAME}.`,
     );
     console.log('[monitor] Email de prueba enviado (sin próximos partidos).');
     return;
@@ -30,14 +31,14 @@ async function sendStartupTestEmail(
     nextMatch.startTime,
   );
 
-  await emailService.send('Prueba de monitor - Mundial 2026', body);
+  await emailService.send(`Prueba de ${MONITOR_NAME}`, body);
   console.log('[monitor] Email de prueba enviado correctamente.');
 }
 
 async function startHealthServer(port: number): Promise<void> {
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'mundial2026-monitor' }));
+    res.end(JSON.stringify({ status: 'ok', service: SERVICE_ID }));
   });
 
   await new Promise<void>((resolve) => {
@@ -49,12 +50,9 @@ async function startHealthServer(port: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log('[monitor] Iniciando monitor de partidos del Mundial 2026');
+  console.log(`[monitor] Iniciando monitor de la ${LEAGUE_NAME}`);
 
-  const apiClient = new FootballDataClient({
-    apiKey: config.footballDataApiKey,
-    worldCupCompetitionCode: config.worldCupCompetitionCode,
-  });
+  const apiClient = new FootballDataClient();
 
   const emailService = new ResendEmailService({
     apiKey: config.resendApiKey,

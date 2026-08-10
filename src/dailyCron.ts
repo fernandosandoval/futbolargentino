@@ -1,4 +1,5 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { LEAGUE_NAME } from './constants/branding';
 import type { EmailService, FootballDataApi, MatchInfo } from './types';
 import { escapeHtml, renderCrestImg } from './utils/emailTemplates';
 import { translateTeamName } from './utils/translations';
@@ -43,7 +44,7 @@ export function formatMorningSummaryHtml(match: MatchInfo): string {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Resumen matutino Mundial</title>
+    <title>Resumen matutino - ${escapeHtml(LEAGUE_NAME)}</title>
   </head>
   <body style="margin:0;padding:0;background-color:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f4f6f8;padding:24px 12px;">
@@ -52,7 +53,7 @@ export function formatMorningSummaryHtml(match: MatchInfo): string {
           <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
             <tr>
               <td style="padding:28px 24px 12px;text-align:center;">
-                <h1 style="margin:0;font-size:26px;line-height:1.3;color:#111827;">¡Hoy hay partido del Mundial!</h1>
+                <h1 style="margin:0;font-size:26px;line-height:1.3;color:#111827;">¡Hoy hay partido de la ${escapeHtml(LEAGUE_NAME)}!</h1>
               </td>
             </tr>
             <tr>

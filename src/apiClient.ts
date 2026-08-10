@@ -1,28 +1,251 @@
-import { translateGroup, translateStage, translateTeamName } from './utils/translations';
-import { ARGENTINA_TIMEZONE, isSameCalendarDay } from './utils/timezone';
 import { ApiCache } from './apiCache';
+import { httpFetch } from './httpFetch';
 import { withRetry } from './retry';
+import { translateGroup, translateStage, translateTeamName } from './utils/translations';
+import { ARGENTINA_TIMEZONE, formatCalendarDate, isSameCalendarDay } from './utils/timezone';
 import type {
   FootballDataApi,
   FootballMatch,
-  MatchInfo,
   MatchDuration,
+  MatchInfo,
+  MatchStatus,
+  MatchWinner,
   Referee,
   Team,
-  TeamMatchesResponse,
 } from './types';
 
-const FOOTBALL_DATA_BASE_URL = 'https://api.football-data.org/v4';
+export const ESPN_SCOREBOARD_URL =
+  'https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard';
+
+/** Días hacia adelante que consultamos en el scoreboard (ESPN devuelve un día por request). */
+const SCOREBOARD_LOOKAHEAD_DAYS = 21;
 
 const UPCOMING_STATUSES = new Set(['SCHEDULED', 'TIMED']);
 
-const COMPETITION_CACHE_TTL_MS = 60_000;
+const SCOREBOARD_CACHE_TTL_MS = 60_000;
 const MATCH_CACHE_TTL_MS = 30_000;
 
 export interface FootballDataClientOptions {
-  apiKey: string;
-  worldCupCompetitionCode: string;
   fetchFn?: typeof fetch;
+  /** Override para tests; por defecto SCOREBOARD_LOOKAHEAD_DAYS. */
+  scoreboardLookaheadDays?: number;
+}
+
+export interface EspnScoreboardResponse {
+  events?: EspnEvent[];
+}
+
+export interface EspnCompetitor {
+  id: string;
+  homeAway: 'home' | 'away';
+  winner?: boolean;
+  score?: string;
+  team: {
+    id?: string;
+    displayName: string;
+    shortDisplayName?: string;
+    abbreviation?: string;
+    logo?: string;
+  };
+}
+
+export interface EspnEvent {
+  id: string;
+  date: string;
+  name?: string;
+  shortName?: string;
+  status: {
+    type: {
+      name?: string;
+      state?: string;
+      completed?: boolean;
+      description?: string;
+      detail?: string;
+    };
+  };
+  season?: {
+    type?: number;
+    slug?: string;
+  };
+  competitions: Array<{
+    competitors: EspnCompetitor[];
+    venue?: {
+      fullName?: string;
+    };
+    attendance?: number;
+  }>;
+}
+
+export function buildScoreboardUrl(calendarDate?: string): string {
+  if (!calendarDate) {
+    return ESPN_SCOREBOARD_URL;
+  }
+  return `${ESPN_SCOREBOARD_URL}?dates=${calendarDate}`;
+}
+
+function toEspnCalendarDate(date: Date, timeZone: string = ARGENTINA_TIMEZONE): string {
+  return formatCalendarDate(date, timeZone).replace(/-/g, '');
+}
+
+function addCalendarDays(date: Date, days: number, timeZone: string = ARGENTINA_TIMEZONE): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  // Normalizar al mediodía UTC para evitar saltos de día al formatear en Argentina.
+  const calendar = formatCalendarDate(next, timeZone);
+  return new Date(`${calendar}T12:00:00.000Z`);
+}
+
+function parseNumericId(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseScore(score: string | undefined): number | null {
+  if (score === undefined || score === '') {
+    return null;
+  }
+  const parsed = Number(score);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function mapEspnStatusToMatchStatus(event: EspnEvent): MatchStatus {
+  const name = event.status.type.name?.toUpperCase() ?? '';
+
+  if (name === 'STATUS_FINAL' || event.status.type.completed) {
+    return 'FINISHED';
+  }
+  if (name === 'STATUS_IN_PROGRESS') {
+    return 'IN_PLAY';
+  }
+  if (name === 'STATUS_SCHEDULED') {
+    return 'SCHEDULED';
+  }
+
+  const state = event.status.type.state?.toLowerCase() ?? '';
+  if (state === 'post' || name.includes('FINAL')) {
+    return 'FINISHED';
+  }
+  if (name.includes('HALFTIME')) {
+    return 'PAUSED';
+  }
+  if (state === 'in' || name.includes('IN_PROGRESS')) {
+    return 'IN_PLAY';
+  }
+  if (name.includes('POSTPONED')) {
+    return 'POSTPONED';
+  }
+  if (name.includes('CANCELED') || name.includes('CANCELLED')) {
+    return 'CANCELLED';
+  }
+  if (name.includes('SUSPENDED')) {
+    return 'SUSPENDED';
+  }
+  if (state === 'pre' || name.includes('SCHEDULED')) {
+    return 'SCHEDULED';
+  }
+
+  return 'SCHEDULED';
+}
+
+function mapEspnWinner(
+  home: EspnCompetitor,
+  away: EspnCompetitor,
+  status: MatchStatus,
+): MatchWinner {
+  if (home.winner === true) {
+    return 'HOME_TEAM';
+  }
+  if (away.winner === true) {
+    return 'AWAY_TEAM';
+  }
+
+  const homeScore = parseScore(home.score);
+  const awayScore = parseScore(away.score);
+  if (status === 'FINISHED' && homeScore !== null && homeScore === awayScore) {
+    return 'DRAW';
+  }
+
+  return null;
+}
+
+export function mapEspnEventToMatch(event: EspnEvent): FootballMatch {
+  const competition = event.competitions[0];
+  if (!competition) {
+    throw new Error(`Evento ESPN ${event.id} sin competitions`);
+  }
+
+  const home = competition.competitors.find((competitor) => competitor.homeAway === 'home');
+  const away = competition.competitors.find((competitor) => competitor.homeAway === 'away');
+  if (!home || !away) {
+    throw new Error(`Evento ESPN ${event.id} sin equipos local/visitante`);
+  }
+
+  const status = mapEspnStatusToMatchStatus(event);
+  const homeScore = parseScore(home.score);
+  const awayScore = parseScore(away.score);
+
+  return {
+    id: parseNumericId(event.id),
+    utcDate: event.date,
+    status,
+    stage: event.season?.slug ?? null,
+    venue: competition.venue?.fullName ?? null,
+    minute: null,
+    attendance: competition.attendance ?? null,
+    homeTeam: {
+      id: parseNumericId(home.team.id ?? home.id),
+      name: home.team.displayName,
+      shortName: home.team.shortDisplayName,
+      tla: home.team.abbreviation,
+      crest: home.team.logo ?? null,
+    },
+    awayTeam: {
+      id: parseNumericId(away.team.id ?? away.id),
+      name: away.team.displayName,
+      shortName: away.team.shortDisplayName,
+      tla: away.team.abbreviation,
+      crest: away.team.logo ?? null,
+    },
+    competition: {
+      id: 1,
+      name: 'Liga Profesional Argentina',
+      code: 'ARG.1',
+    },
+    score: {
+      winner: mapEspnWinner(home, away, status),
+      duration: 'REGULAR',
+      fullTime: {
+        homeTeam: homeScore,
+        awayTeam: awayScore,
+      },
+      halfTime: {
+        homeTeam: null,
+        awayTeam: null,
+      },
+    },
+    goals: [],
+    bookings: [],
+    substitutions: [],
+  };
+}
+
+export function mapEspnEvents(events: EspnEvent[]): FootballMatch[] {
+  return events.flatMap((event) => {
+    try {
+      return [mapEspnEventToMatch(event)];
+    } catch (error) {
+      console.warn(`[espn] Se omitió el evento ${event.id}:`, error);
+      return [];
+    }
+  });
+}
+
+function dedupeMatchesById(matches: FootballMatch[]): FootballMatch[] {
+  const byId = new Map<number, FootballMatch>();
+  for (const match of matches) {
+    byId.set(match.id, match);
+  }
+  return Array.from(byId.values());
 }
 
 export function getTeamDisplayName(team: Team): string {
@@ -93,26 +316,28 @@ export function describeMatchWinner(match: FootballMatch): string {
 }
 
 export class FootballDataClient implements FootballDataApi {
-  private readonly apiKey: string;
-  private readonly worldCupCompetitionCode: string;
   private readonly fetchFn: typeof fetch;
-  private readonly competitionCache = new ApiCache<FootballMatch[]>();
+  private readonly scoreboardLookaheadDays: number;
+  private readonly scoreboardCache = new ApiCache<FootballMatch[]>();
   private readonly matchCache = new ApiCache<FootballMatch>();
 
-  constructor(options: FootballDataClientOptions) {
-    this.apiKey = options.apiKey;
-    this.worldCupCompetitionCode = options.worldCupCompetitionCode;
-    this.fetchFn = options.fetchFn ?? fetch;
+  constructor(options: FootballDataClientOptions = {}) {
+    this.fetchFn = options.fetchFn ?? httpFetch;
+    this.scoreboardLookaheadDays = options.scoreboardLookaheadDays ?? SCOREBOARD_LOOKAHEAD_DAYS;
   }
 
   async getUpcomingMatches(): Promise<MatchInfo[]> {
-    const matches = await this.fetchCompetitionMatches();
-    return filterUpcomingMatches(matches).map((match) => this.toMatchInfo(match));
+    const matches = await this.fetchScoreboard();
+    const upcoming = filterUpcomingMatches(matches);
+    console.log(`[espn] Próximos partidos encontrados: ${upcoming.length}`);
+    return upcoming.map((match) => this.toMatchInfo(match));
   }
 
   async getTodaysMatches(now: Date = new Date()): Promise<MatchInfo[]> {
-    const matches = await this.fetchCompetitionMatches();
-    return filterMatchesByCalendarDay(matches, now).map((match) => this.toMatchInfo(match));
+    const matches = await this.fetchScoreboard();
+    const today = filterMatchesByCalendarDay(matches, now);
+    console.log(`[espn] Partidos de hoy: ${today.length}`);
+    return today.map((match) => this.toMatchInfo(match));
   }
 
   async getNextMatch(): Promise<MatchInfo | null> {
@@ -124,33 +349,28 @@ export class FootballDataClient implements FootballDataApi {
     const cacheKey = `match-${matchId}`;
     const cached = this.matchCache.get(cacheKey);
     if (cached) {
+      console.log(`[espn] Partido ${matchId} servido desde caché`);
       return cached;
     }
 
-    const url = `${FOOTBALL_DATA_BASE_URL}/matches/${matchId}`;
     const match = await withRetry(async () => {
-      const response = await this.fetchFn(url, {
-        headers: {
-          'X-Auth-Token': this.apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Error al consultar partido ${matchId} (${response.status}): ${await response.text()}`,
-        );
+      const matches = await this.fetchScoreboard(true);
+      const found = matches.find((candidate) => candidate.id === matchId);
+      if (!found) {
+        throw new Error(`Partido ${matchId} no encontrado en el scoreboard de ESPN`);
       }
-
-      return (await response.json()) as FootballMatch;
+      return found;
     });
 
     this.matchCache.set(cacheKey, match, MATCH_CACHE_TTL_MS);
+    console.log(`[espn] Partido ${matchId} obtenido: ${foundSummary(match)}`);
     return match;
   }
 
   clearCache(): void {
-    this.competitionCache.clear();
+    this.scoreboardCache.clear();
     this.matchCache.clear();
+    console.log('[espn] Caché limpiada');
   }
 
   toMatchInfo(match: FootballMatch): MatchInfo {
@@ -182,33 +402,65 @@ export class FootballDataClient implements FootballDataApi {
     };
   }
 
-  private async fetchCompetitionMatches(): Promise<FootballMatch[]> {
-    const cacheKey = `competition-${this.worldCupCompetitionCode}`;
-    const cached = this.competitionCache.get(cacheKey);
+  private async fetchScoreboard(forceRefresh = false): Promise<FootballMatch[]> {
+    const cacheKey = 'espn-arg1-scoreboard';
+    const cached = forceRefresh ? null : this.scoreboardCache.get(cacheKey);
     if (cached) {
+      console.log(`[espn] Scoreboard servido desde caché (${cached.length} partidos)`);
       return cached;
     }
 
-    const url = `${FOOTBALL_DATA_BASE_URL}/competitions/${this.worldCupCompetitionCode}/matches`;
+    try {
+      const matches = await withRetry(async () => this.fetchScoreboardWindow());
+      this.scoreboardCache.set(cacheKey, matches, SCOREBOARD_CACHE_TTL_MS);
+      console.log(
+        `[espn] Scoreboard actualizado: ${matches.length} partido(s) en ventana de ${this.scoreboardLookaheadDays} día(s)`,
+      );
+      return matches;
+    } catch (error) {
+      console.error('[espn] Error al consultar el scoreboard:', error);
+      throw error;
+    }
+  }
 
-    const data = await withRetry(async () => {
-      const response = await this.fetchFn(url, {
-        headers: {
-          'X-Auth-Token': this.apiKey,
-        },
-      });
+  private async fetchScoreboardWindow(): Promise<FootballMatch[]> {
+    const today = new Date();
+    const calendarDates: string[] = [];
 
-      if (!response.ok) {
-        throw new Error(
-          `Error al consultar Football-Data.org (${response.status}): ${await response.text()}`,
-        );
-      }
+    for (let offset = 0; offset < this.scoreboardLookaheadDays; offset += 1) {
+      calendarDates.push(toEspnCalendarDate(addCalendarDays(today, offset)));
+    }
 
-      return (await response.json()) as TeamMatchesResponse;
-    });
+    console.log(
+      `[espn] Consultando scoreboard para ${calendarDates.length} fecha(s): ${calendarDates[0]} … ${calendarDates.at(-1)}`,
+    );
 
-    const matches = data.matches ?? [];
-    this.competitionCache.set(cacheKey, matches, COMPETITION_CACHE_TTL_MS);
+    const batches = await Promise.all(
+      calendarDates.map(async (calendarDate) => this.fetchScoreboardForDate(calendarDate)),
+    );
+
+    return dedupeMatchesById(batches.flat());
+  }
+
+  private async fetchScoreboardForDate(calendarDate: string): Promise<FootballMatch[]> {
+    const url = buildScoreboardUrl(calendarDate);
+    console.log(`[espn] GET ${url}`);
+
+    const response = await this.fetchFn(url);
+    if (!response.ok) {
+      throw new Error(
+        `Error al consultar ESPN (${response.status}) para ${calendarDate}: ${await response.text()}`,
+      );
+    }
+
+    const data = (await response.json()) as EspnScoreboardResponse;
+    const eventCount = data.events?.length ?? 0;
+    const matches = mapEspnEvents(data.events ?? []);
+    console.log(`[espn] ${calendarDate}: ${eventCount} evento(s) → ${matches.length} partido(s)`);
     return matches;
   }
+}
+
+function foundSummary(match: FootballMatch): string {
+  return `${match.homeTeam.name} vs ${match.awayTeam.name} [${match.status}]`;
 }

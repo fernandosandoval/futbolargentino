@@ -1,4 +1,5 @@
 import { describeMatchWinner } from './apiClient';
+import { LEAGUE_NAME } from './constants/branding';
 import { JobStore, type PersistedJob } from './jobStore';
 import { LiveMatchTracker } from './liveTracker';
 import {
@@ -61,7 +62,7 @@ export class MatchScheduler {
 
     const matches = await this.apiClient.getUpcomingMatches();
     if (matches.length === 0) {
-      console.log('[scheduler] No hay próximos partidos programados en el Mundial.');
+      console.log(`[scheduler] No hay próximos partidos programados en la ${LEAGUE_NAME}.`);
       return [];
     }
 
@@ -90,7 +91,7 @@ export class MatchScheduler {
         const scheduledAt = new Date(job.scheduledAt);
         const elapsed = Date.now() - scheduledAt.getTime();
         if (elapsed < 30 * 60 * 1000) {
-          console.log(`[scheduler] Job perdido ${job.id}:环境污染< 30 min, enviando notificación`);
+          console.log(`[scheduler] Job perdido ${job.id}: hace < 30 min, enviando notificación`);
           try {
             const match = await this.apiClient.getMatchById(job.matchId);
             const matchInfo = this.apiClient.toMatchInfo(match);
