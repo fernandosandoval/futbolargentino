@@ -1,9 +1,9 @@
+import 'dotenv/config';
 import { FootballDataClient } from './apiClient';
 import { config } from './config';
 import { ResendEmailService } from './emailService';
 import { escapeHtml } from './utils/emailTemplates';
 import { translateTeamName } from './utils/translations';
-import { config } from 'dotenv';
 
 const TEST_SUBJECT = '✅ Prueba de Sistema - Fútbol Argentino';
 
