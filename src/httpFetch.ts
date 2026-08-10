@@ -51,10 +51,10 @@ async function fetchViaWindowsCurl(url: string): Promise<Response> {
  * (común con antivirus o inspección HTTPS corporativa).
  */
 export async function httpFetch(
-  input: RequestInfo | URL,
+  input: Parameters<typeof fetch>[0],
   init?: RequestInit,
 ): Promise<Response> {
-  const url = String(input);
+  const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
 
   try {
     return await fetch(input, init);
