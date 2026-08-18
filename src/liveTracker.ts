@@ -98,11 +98,22 @@ export class LiveMatchTracker {
     if (newStatus === 'PAUSED' && !this.halftimeEmailSent) {
       this.halftimeEmailSent = true;
       const match = await this.apiClient.getMatchById(this.match.id);
+      // En descanso el marcador actual es el del entretiempo si ESPN no envía halfTime.
+      const htHome =
+        match.score?.halfTime?.homeTeam ??
+        match.score?.fullTime?.homeTeam ??
+        this.match.halfTimeHome ??
+        0;
+      const htAway =
+        match.score?.halfTime?.awayTeam ??
+        match.score?.fullTime?.awayTeam ??
+        this.match.halfTimeAway ??
+        0;
       const updatedMatch: MatchInfo = {
         ...this.match,
         status: match.status as MatchInfo['status'],
-        halfTimeHome: match.score?.halfTime?.homeTeam ?? this.match.halfTimeHome,
-        halfTimeAway: match.score?.halfTime?.awayTeam ?? this.match.halfTimeAway,
+        halfTimeHome: htHome,
+        halfTimeAway: htAway,
       };
 
       const home = match.homeTeam.name ?? this.match.homeTeamName;
@@ -110,7 +121,7 @@ export class LiveMatchTracker {
       const subject = `Descanso: ${home} vs ${away}`;
       const html = halftimeHtml(updatedMatch);
 
-      await this.emailService.send(subject, `Descanso: ${home} ${match.score?.halfTime?.homeTeam ?? 0} - ${match.score?.halfTime?.awayTeam ?? 0} ${away}`, { html });
+      await this.emailService.send(subject, `Descanso: ${home} ${htHome} - ${htAway} ${away}`, { html });
       console.log(`[liveTracker] Email de descanso enviado para partido ${this.match.id}`);
     }
   }

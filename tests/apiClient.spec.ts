@@ -130,6 +130,92 @@ test.describe('Cliente público de ESPN', () => {
     ).toBe('FINISHED');
   });
 
+  test('en descanso usa el marcador actual como resultado de entretiempo', () => {
+    const match = mapEspnEventToMatch(
+      createEspnEvent({
+        status: { type: { name: 'STATUS_HALFTIME', state: 'in' } },
+        competitions: [
+          {
+            venue: { fullName: 'El Monumental' },
+            competitors: [
+              {
+                id: '16',
+                homeAway: 'home',
+                score: '2',
+                team: {
+                  id: '16',
+                  displayName: 'River Plate',
+                  abbreviation: 'RIV',
+                  logo: 'https://example.com/river.png',
+                },
+              },
+              {
+                id: '5',
+                homeAway: 'away',
+                score: '1',
+                team: {
+                  id: '5',
+                  displayName: 'Boca Juniors',
+                  abbreviation: 'BOC',
+                  logo: 'https://example.com/boca.png',
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(match.status).toBe('PAUSED');
+    expect(match.score?.fullTime).toEqual({ homeTeam: 2, awayTeam: 1 });
+    expect(match.score?.halfTime).toEqual({ homeTeam: 2, awayTeam: 1 });
+  });
+
+  test('prioriza linescores del primer tiempo cuando están disponibles', () => {
+    const match = mapEspnEventToMatch(
+      createEspnEvent({
+        status: {
+          type: { name: 'STATUS_FULL_TIME', state: 'post', completed: true },
+        },
+        competitions: [
+          {
+            venue: { fullName: 'El Monumental' },
+            competitors: [
+              {
+                id: '16',
+                homeAway: 'home',
+                score: '3',
+                linescores: [{ displayValue: '1' }, { displayValue: '2' }],
+                team: {
+                  id: '16',
+                  displayName: 'River Plate',
+                  abbreviation: 'RIV',
+                  logo: 'https://example.com/river.png',
+                },
+              },
+              {
+                id: '5',
+                homeAway: 'away',
+                score: '1',
+                linescores: [{ displayValue: '0' }, { displayValue: '1' }],
+                team: {
+                  id: '5',
+                  displayName: 'Boca Juniors',
+                  abbreviation: 'BOC',
+                  logo: 'https://example.com/boca.png',
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(match.status).toBe('FINISHED');
+    expect(match.score?.fullTime).toEqual({ homeTeam: 3, awayTeam: 1 });
+    expect(match.score?.halfTime).toEqual({ homeTeam: 1, awayTeam: 0 });
+  });
+
   test('consulta ESPN sin headers de autenticación y devuelve próximos partidos', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchFn: typeof fetch = async (input, init) => {

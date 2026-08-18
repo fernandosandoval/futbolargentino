@@ -35,11 +35,18 @@ export interface EspnScoreboardResponse {
   events?: EspnEvent[];
 }
 
+export interface EspnLineScore {
+  value?: number | string;
+  displayValue?: string;
+}
+
 export interface EspnCompetitor {
   id: string;
   homeAway: 'home' | 'away';
   winner?: boolean;
   score?: string;
+  /** Marcador por tiempo; el índice 0 es el primer tiempo cuando está presente. */
+  linescores?: EspnLineScore[];
   team: {
     id?: string;
     displayName: string;
@@ -100,12 +107,44 @@ function parseNumericId(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function parseScore(score: string | undefined): number | null {
+function parseScore(score: string | number | undefined): number | null {
   if (score === undefined || score === '') {
     return null;
   }
   const parsed = Number(score);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLineScore(lineScore: EspnLineScore | undefined): number | null {
+  if (!lineScore) {
+    return null;
+  }
+  return parseScore(lineScore.displayValue ?? lineScore.value);
+}
+
+/**
+ * ESPN no siempre expone el entretiempo en el scoreboard.
+ * Si hay linescores, el índice 0 es el 1.er tiempo.
+ * En descanso (PAUSED) el score actual es el del entretiempo.
+ */
+export function resolveHalfTimeScore(
+  home: EspnCompetitor,
+  away: EspnCompetitor,
+  status: MatchStatus,
+  homeScore: number | null,
+  awayScore: number | null,
+): { homeTeam: number | null; awayTeam: number | null } {
+  const fromLinesHome = parseLineScore(home.linescores?.[0]);
+  const fromLinesAway = parseLineScore(away.linescores?.[0]);
+  if (fromLinesHome !== null || fromLinesAway !== null) {
+    return { homeTeam: fromLinesHome, awayTeam: fromLinesAway };
+  }
+
+  if (status === 'PAUSED') {
+    return { homeTeam: homeScore, awayTeam: awayScore };
+  }
+
+  return { homeTeam: null, awayTeam: null };
 }
 
 export function mapEspnStatusToMatchStatus(event: EspnEvent): MatchStatus {
@@ -183,6 +222,7 @@ export function mapEspnEventToMatch(event: EspnEvent): FootballMatch {
   const status = mapEspnStatusToMatchStatus(event);
   const homeScore = parseScore(home.score);
   const awayScore = parseScore(away.score);
+  const halfTime = resolveHalfTimeScore(home, away, status, homeScore, awayScore);
 
   return {
     id: parseNumericId(event.id),
@@ -218,10 +258,7 @@ export function mapEspnEventToMatch(event: EspnEvent): FootballMatch {
         homeTeam: homeScore,
         awayTeam: awayScore,
       },
-      halfTime: {
-        homeTeam: null,
-        awayTeam: null,
-      },
+      halfTime,
     },
     goals: [],
     bookings: [],

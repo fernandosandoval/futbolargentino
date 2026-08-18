@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { LiveMatchTracker } from '../src/liveTracker';
 import { MockEmailService } from '../src/emailService';
 import { createSampleMatchInfo, createFinishedMatch, MockFootballDataApi } from './helpers/mocks';
+import type { FootballMatch } from '../src/types';
 
 test.describe('LiveMatchTracker - Email de resultado final', () => {
   test('envía email con el marcador correcto al finalizar el partido', async () => {
@@ -117,5 +118,45 @@ test.describe('LiveMatchTracker - Email de resultado final', () => {
     expect(resultEmail).toBeDefined();
     expect(resultEmail!.subject).toBe('Terminó: Argentina 1 - 2 Francia');
     expect(resultEmail!.body).toContain('Ganó Francia');
+  });
+
+  test('envía email de descanso con el marcador actual si halfTime viene vacío', async () => {
+    const matchInfo = createSampleMatchInfo({
+      id: 2004,
+      homeTeamName: 'River Plate',
+      awayTeamName: 'Boca Juniors',
+      status: 'IN_PLAY',
+    });
+
+    const pausedMatch: FootballMatch = {
+      id: 2004,
+      utcDate: '2026-06-15T18:00:00.000Z',
+      status: 'PAUSED',
+      homeTeam: { id: 16, name: 'River Plate' },
+      awayTeam: { id: 5, name: 'Boca Juniors' },
+      score: {
+        winner: null,
+        fullTime: { homeTeam: 2, awayTeam: 1 },
+        halfTime: { homeTeam: null, awayTeam: null },
+      },
+    };
+
+    const apiClient = new MockFootballDataApi(matchInfo, new Map([[2004, pausedMatch]]));
+    const emailService = new MockEmailService();
+
+    const tracker = new LiveMatchTracker({
+      apiClient,
+      emailService,
+      match: matchInfo,
+      pollIntervalMs: 1000,
+    });
+
+    await (tracker as any).poll();
+
+    const halftimeEmail = emailService.sentEmails.find((e) => e.subject.includes('Descanso'));
+    expect(halftimeEmail).toBeDefined();
+    expect(halftimeEmail!.body).toContain('River Plate 2 - 1 Boca Juniors');
+    expect(halftimeEmail!.html).toContain('2 - 1');
+    expect(halftimeEmail!.html).not.toContain('>0 - 0<');
   });
 });
